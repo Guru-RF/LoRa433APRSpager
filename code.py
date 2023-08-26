@@ -8,6 +8,7 @@ from adafruit_display_text import label
 import adafruit_displayio_sh1106
 import simpleio
 import adafruit_rgbled
+from analogio import AnalogIn
 from rainbowio import colorwheel
 
 displayio.release_displays()
@@ -57,10 +58,23 @@ button= digitalio.DigitalInOut(board.GP12)
 button.direction = digitalio.Direction.INPUT
 button.pull = digitalio.Pull.UP
 
+charging = digitalio.DigitalInOut(board.GP13)
+charging.direction = digitalio.Direction.INPUT
+charging.pull = digitalio.Pull.DOWN
+
+# Battery Analog
+analog_bat = AnalogIn(board.GP27)
+
 RGBled1 = adafruit_rgbled.RGBLED(board.GP7, board.GP8, board.GP9, invert_pwm=True)
 
+# Voltage Func
+def get_voltage(pin):
+    return ((pin.value * 3.3) / 65536)*2
+
 while True:
+    text_area.text = str(get_voltage(analog_bat))
     if button.value is False:
+        text_area.text = "Play tune"
         simpleio.tone(board.GP15, 330, duration=0.25)
         simpleio.tone(board.GP15, 349, duration=0.25)
         simpleio.tone(board.GP15, 392, duration=0.25)
