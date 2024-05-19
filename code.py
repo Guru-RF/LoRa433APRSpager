@@ -8,8 +8,10 @@ import adafruit_rgbled
 import board
 import busio
 import displayio
+import rtc
 import simpleio
 import terminalio
+from adafruit_display_shapes.line import Line
 from adafruit_display_text.bitmap_label import Label
 from adafruit_display_text.scrolling_label import ScrollingLabel
 from analogio import AnalogIn
@@ -17,7 +19,6 @@ from digitalio import DigitalInOut, Direction, Pull
 from displayio import FourWire
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
-
 
 import config
 
@@ -64,20 +65,54 @@ display.root_group = splash
 # )
 # splash.append(inner_sprite)
 
-text = "Waiting for messages ..."
-text_area = ScrollingLabel(
-    terminalio.FONT, text=text, max_characters=18, animate_time=0.4
-)
-text_area.x = 10
-text_area.y = 30
-splash.append(text_area)
+text = ""
+aprsLastMessage = Label(terminalio.FONT, text=text, max_charactrters=20, animate_time=0)
+aprsLastMessage.x = 3
+aprsLastMessage.y = 28
+splash.append(aprsLastMessage)
 
-## Draw a label
-text = "Last message:"
-text_area_label = Label(terminalio.FONT, text=text, max_characters=18, animate_time=0.4)
-text_area_label.x = 10
-text_area_label.y = 10
-splash.append(text_area_label)
+text = "Waiting for messages ..."
+aprsMessage = ScrollingLabel(
+    terminalio.FONT, text=text, max_characters=20, animate_time=0.5
+)
+aprsMessage.x = 3
+aprsMessage.y = 40
+splash.append(aprsMessage)
+
+## APRSGateway
+text = "{:9}:".format("NO SIGNAL")
+aprsGateway = Label(terminalio.FONT, text=text, max_characters=18, animate_time=0)
+aprsGateway.x = 3
+aprsGateway.y = 7
+splash.append(aprsGateway)
+
+## APRSSNR
+text = "SNR:0.00"
+aprsSNR = Label(terminalio.FONT, text=text, max_characters=18, animate_time=0)
+aprsSNR.x = 78
+aprsSNR.y = 7
+splash.append(aprsSNR)
+
+## Battery
+text = "B:99%"
+batteryLevel = Label(terminalio.FONT, text=text, max_characters=18, animate_time=0)
+batteryLevel.x = 3
+batteryLevel.y = 57
+splash.append(batteryLevel)
+
+## Time
+text = "DD/MM/YY HH:MM"
+displayTime = Label(terminalio.FONT, text=text, max_characters=20, animate_time=0.4)
+displayTime.x = 42
+displayTime.y = 57
+splash.append(displayTime)
+
+splash.append(Line(0, 0, 270, 0, 0xFFFFFF))
+splash.append(Line(0, 13, 270, 13, 0xFFFFFF))
+splash.append(Line(127, 0, 127, 63, 0xFFFFFF))
+splash.append(Line(0, 0, 0, 63, 0xFFFFFF))
+splash.append(Line(0, 50, 270, 50, 0xFFFFFF))
+splash.append(Line(0, 63, 270, 63, 0xFFFFFF))
 
 button = DigitalInOut(board.GP12)
 button.direction = Direction.INPUT
@@ -93,20 +128,20 @@ analog_bat = AnalogIn(board.GP27)
 RGBled1 = adafruit_rgbled.RGBLED(board.GP7, board.GP8, board.GP9, invert_pwm=True)
 
 
+# Format Time
+def _format_datetime(datetime):
+    return "{:02}/{:02}/{:02} {:02}:{:02}".format(
+        datetime.tm_mon,
+        datetime.tm_mday,
+        datetime.tm_year % 100,
+        datetime.tm_hour,
+        datetime.tm_min,
+    )
+
+
 # Voltage Func
 def get_voltage(pin):
     return ((pin.value * 3.3) / 65536) * 2
-
-
-def _format_datetime(datetime):
-    return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
-        datetime.tm_mon,
-        datetime.tm_mday,
-        datetime.tm_year,
-        datetime.tm_hour,
-        datetime.tm_min,
-        datetime.tm_sec,
-    )
 
 
 def purple(data):
@@ -168,20 +203,22 @@ loraTimeout = 900
 
 async def playTone(loop):
     simpleio.tone(board.GP15, 330)
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.05)
     simpleio.tone(board.GP15, 349)
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.05)
 
 
 async def displayRunner(loop):
-    global text_area
+    global aprsMessage, displayTime
     while True:
         await asyncio.sleep(0)
-        text_area.update()
+        aprsMessage.update()
+        if displayTime.text != "{}".format(_format_datetime(time.localtime())):
+            displayTime.text = "{}".format(_format_datetime(time.localtime()))
 
 
 async def loraRunner(loop):
-    global w, text_area
+    global w, aprsMessage, aprsLastMessage, aprsGateway
     # Continuously receives LoRa packets and forwards valid APRS packets
     # via WiFi. Configures LoRa radio, prints status messages, handles
     # exceptions, creates asyncio tasks to process packets.
@@ -218,23 +255,39 @@ async def loraRunner(loop):
                         aprsdata = rawdata.split("::", 1)
                         # only text messages
                         if aprsdata[1].count(":") == 2:
+                            gateway = (rawdata.split(">", 1))[0]
                             aprsmessage = aprsdata[1].split(":", 2)
                             fromcall = aprsmessage[0]
                             tocall = aprsmessage[1].strip()
                             message = aprsmessage[2]
                             if tocall is config.call:
                                 asyncio.create_task(playTone(loop))
-                                text_area.text = fromcall + ": " + message
+                                if aprsLastMessage.text == "":
+                                    aprsLastMessage.text = fromcall + ": " + message
+                                aprsSNR.text = "SNR:{:5}".format(str(rfm9x.last_snr))
+                                aprsGateway.text = "{:9}:".format(gateway)
 
                             print(
                                 green(
                                     f"loraRunner: MSG: FROM:{fromcall} TO:{tocall} MSG:{message}"
                                 )
                             )
-                    #                    syslog.send(
-                    #                        f"loraRunner: RX: RSSI:{rfm9x.last_rssi} SNR:{rfm9x.last_snr} Data:{rawdata}"
-                    #                    )
-                    # loop.create_task(tcpPost(rawdata))
+                        elif aprsdata[1].count(":") == 1:
+                            aprsmessage = aprsdata[1].split(":", 1)
+                            tocall = aprsmessage[0]
+                            gateway = (rawdata.split(">", 1))[0]
+                            aprstime = aprsmessage[1].strip()
+                            if tocall == "APRFGD":
+                                asyncio.create_task(playTone(loop))
+                                aprsSNR.text = "SNR:{:5}".format(str(rfm9x.last_snr))
+                                aprsGateway.text = "{:9}:".format(gateway)
+                                rtc.RTC().datetime = time.localtime(int(aprstime))
+
+                                print(
+                                    green(
+                                        f"loraRunner: BEACON: FROM:{gateway} TO:{tocall} TIME:{aprstime}"
+                                    )
+                                )
                     await asyncio.sleep(0)
                 except Exception as error:
                     print(bgred(f"loraRunner: An exception occurred: {error}"))
