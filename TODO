@@ -8,5 +8,7 @@ configurable time zone
 Final:
 add LED signal for new messages
 auto sleep display
+wake up display on new message !!
 scroll through messages
+long press -> clear messages
 
