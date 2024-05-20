@@ -8,8 +8,8 @@ import adafruit_rgbled
 import board
 import busio
 import displayio
+import pwmio
 import rtc
-import simpleio
 import terminalio
 from adafruit_display_shapes.line import Line
 from adafruit_display_text.bitmap_label import Label
@@ -35,7 +35,7 @@ def _format_datetime(datetime):
 
 
 def _format_datetime_short(datetime):
-    return "{:02}.{:02} {:02}:{:02}".format(
+    return "{:02}/{:02} {:02}:{:02}".format(
         datetime.tm_mday,
         datetime.tm_mon,
         datetime.tm_hour,
@@ -78,6 +78,10 @@ def bgred(data):
     stamp = "{}".format(_format_datetime(time.localtime()))
     return "\x1b[41m[" + str(stamp) + "] " + config.call + data + "\x1b[0m"
 
+
+# setup buzzer (set duty cycle to ON to sound)
+buzzer = pwmio.PWMOut(board.GP15, variable_frequency=True)
+buzzer.frequency = 880
 
 displayio.release_displays()
 
@@ -150,14 +154,14 @@ splash.append(aprsMessageTimeStamp)
 
 text = "Waiting for messages ..."
 aprsMessage = ScrollingLabel(
-    terminalio.FONT, text=text, max_characters=20, animate_time=0.5
+    terminalio.FONT, text=text, max_characters=20, animate_time=0.3
 )
-aprsMessage.x = 3
+aprsMessage.x = 4
 aprsMessage.y = 43
 splash.append(aprsMessage)
 
 ## APRSGateway
-text = "{:9}:".format("NO SIGNAL")
+text = "{:9}".format("NO SIGNAL")
 aprsGateway = Label(terminalio.FONT, text=text, max_characters=18, animate_time=0)
 aprsGateway.x = 3
 aprsGateway.y = 7
@@ -233,11 +237,29 @@ w.feed()
 loraTimeout = 900
 
 
-async def playTone(loop):
-    simpleio.tone(board.GP15, 330)
-    await asyncio.sleep(0.05)
-    simpleio.tone(board.GP15, 349)
-    await asyncio.sleep(0.05)
+async def playTone(loop, type="default"):
+    OFF = 0
+    ON = 2**15
+    global buzzer
+    if type == "default":
+        for x in range(40):
+            buzzer.frequency = 330 + (x * 15)
+            buzzer.duty_cycle = ON
+            await asyncio.sleep(0.02)
+            buzzer.duty_cycle = OFF
+            buzzer.frequency = 580 + (x * 15)
+            buzzer.duty_cycle = ON
+            await asyncio.sleep(0.02)
+            buzzer.duty_cycle = OFF
+    if type == "beacon":
+        buzzer.frequency = 440
+        buzzer.duty_cycle = ON
+        await asyncio.sleep(0.02)
+        buzzer.duty_cycle = OFF
+        buzzer.frequency = 880
+        buzzer.duty_cycle = ON
+        await asyncio.sleep(0.02)
+        buzzer.duty_cycle = OFF
 
 
 async def displayRunner(loop):
@@ -250,7 +272,14 @@ async def displayRunner(loop):
 
 
 async def loraRunner(loop):
-    global w, aprsMessage, aprsMessageCall, aprsMessageTimeStamp, aprsGateway
+    global \
+        w, \
+        aprsMessage, \
+        aprsMessageCall, \
+        aprsMessageTimeStamp, \
+        aprsMessageNr, \
+        aprsUIInfo, \
+        aprsGateway
     # Continuously receives LoRa packets and forwards valid APRS packets
     # via WiFi. Configures LoRa radio, prints status messages, handles
     # exceptions, creates asyncio tasks to process packets.
@@ -262,6 +291,8 @@ async def loraRunner(loop):
     rfm9x = adafruit_rfm9x.RFM9x(
         spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000, agc=False, crc=True
     )
+
+    nrMessages = 0
 
     while True:
         await asyncio.sleep(0)
@@ -294,13 +325,17 @@ async def loraRunner(loop):
                             message = aprsmessage[2]
                             if tocall is config.call:
                                 asyncio.create_task(playTone(loop))
-                                aprsMessage.text = message
+                                nrMessages += 1
+                                aprsMessage.text = "> {} | ".format(message)
+                                aprsMessageNr.text = "{:02}/{:02}".format(
+                                    nrMessages, nrMessages
+                                )
                                 aprsMessageCall.text = "@ {:9}".format(fromcall)
                                 aprsMessageTimeStamp.text = "{}".format(
                                     _format_datetime_short(time.localtime())
                                 )
-                                aprsSNR.text = "SNR:{:5}".format(str(rfm9x.last_snr))
-                                aprsGateway.text = "{:9}:".format(gateway)
+                                aprsSNR.text = "SNR:{:04}".format(str(rfm9x.last_snr))
+                                aprsGateway.text = "{:9}".format(gateway)
 
                             print(
                                 green(
@@ -313,9 +348,9 @@ async def loraRunner(loop):
                             gateway = (rawdata.split(">", 1))[0]
                             aprstime = aprsmessage[1].strip()
                             if tocall == "APRFGD":
-                                asyncio.create_task(playTone(loop))
-                                aprsSNR.text = "SNR:{:5}".format(str(rfm9x.last_snr))
-                                aprsGateway.text = "{:9}:".format(gateway)
+                                asyncio.create_task(playTone(loop, "beacon"))
+                                aprsSNR.text = "SNR:{:04}".format(str(rfm9x.last_snr))
+                                aprsGateway.text = "{:9}".format(gateway)
                                 rtc.RTC().datetime = time.localtime(int(aprstime))
 
                                 print(

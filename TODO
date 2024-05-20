@@ -1,2 +1,12 @@
-denoise analoge readout battery level
-fix zever GPIO input charging
+Hardware
+denoise analoge readout battery level (see tracker)
+
+Poc Software:
+when no beacon for > 30 mins -> no signal
+configurable time zone
+
+Final:
+add LED signal for new messages
+auto sleep display
+scroll through messages
+
