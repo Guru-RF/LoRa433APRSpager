@@ -22,6 +22,63 @@ from watchdog import WatchDogMode
 
 import config
 
+
+# Format Time
+def _format_datetime(datetime):
+    return "{:02}/{:02}/{:02} {:02}:{:02}".format(
+        datetime.tm_mon,
+        datetime.tm_mday,
+        datetime.tm_year % 100,
+        datetime.tm_hour,
+        datetime.tm_min,
+    )
+
+
+def _format_datetime_short(datetime):
+    return "{:02}.{:02} {:02}:{:02}".format(
+        datetime.tm_mday,
+        datetime.tm_mon,
+        datetime.tm_hour,
+        datetime.tm_min,
+    )
+
+
+# Voltage Func
+def get_voltage(pin):
+    return ((pin.value * 3.3) / 65536) * 2
+
+
+def purple(data):
+    stamp = "{}".format(_format_datetime(time.localtime()))
+    return "\x1b[38;5;104m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+
+
+def green(data):
+    stamp = "{}".format(_format_datetime(time.localtime()))
+    return (
+        "\r\x1b[38;5;112m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+    )
+
+
+def blue(data):
+    stamp = "{}".format(_format_datetime(time.localtime()))
+    return "\x1b[38;5;14m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+
+
+def yellow(data):
+    return "\x1b[38;5;220m" + data + "\x1b[0m"
+
+
+def red(data):
+    stamp = "{}".format(_format_datetime(time.localtime()))
+    return "\x1b[1;5;31m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+
+
+def bgred(data):
+    stamp = "{}".format(_format_datetime(time.localtime()))
+    return "\x1b[41m[" + str(stamp) + "] " + config.call + data + "\x1b[0m"
+
+
 displayio.release_displays()
 
 spi = busio.SPI(board.GP10, board.GP11)
@@ -65,18 +122,38 @@ display.root_group = splash
 # )
 # splash.append(inner_sprite)
 
+text = "00/00"
+aprsMessageNr = Label(terminalio.FONT, text=text, max_charactrters=20, animate_time=0)
+aprsMessageNr.x = 3
+aprsMessageNr.y = 20
+splash.append(aprsMessageNr)
+
+text = "Messages"
+aprsUIInfo = Label(terminalio.FONT, text=text, max_charactrters=20, animate_time=0)
+aprsUIInfo.x = 3
+aprsUIInfo.y = 30
+splash.append(aprsUIInfo)
+
 text = ""
-aprsLastMessage = Label(terminalio.FONT, text=text, max_charactrters=20, animate_time=0)
-aprsLastMessage.x = 3
-aprsLastMessage.y = 28
-splash.append(aprsLastMessage)
+aprsMessageCall = Label(terminalio.FONT, text=text, max_charactrters=20, animate_time=0)
+aprsMessageCall.x = 60
+aprsMessageCall.y = 20
+splash.append(aprsMessageCall)
+
+text = ""
+aprsMessageTimeStamp = Label(
+    terminalio.FONT, text=text, max_charactrters=20, animate_time=0
+)
+aprsMessageTimeStamp.x = 60
+aprsMessageTimeStamp.y = 30
+splash.append(aprsMessageTimeStamp)
 
 text = "Waiting for messages ..."
 aprsMessage = ScrollingLabel(
     terminalio.FONT, text=text, max_characters=20, animate_time=0.5
 )
 aprsMessage.x = 3
-aprsMessage.y = 40
+aprsMessage.y = 43
 splash.append(aprsMessage)
 
 ## APRSGateway
@@ -110,7 +187,9 @@ splash.append(displayTime)
 splash.append(Line(0, 0, 270, 0, 0xFFFFFF))
 splash.append(Line(0, 13, 270, 13, 0xFFFFFF))
 splash.append(Line(127, 0, 127, 63, 0xFFFFFF))
+splash.append(Line(57, 13, 57, 36, 0xFFFFFF))
 splash.append(Line(0, 0, 0, 63, 0xFFFFFF))
+splash.append(Line(0, 36, 270, 36, 0xFFFFFF))
 splash.append(Line(0, 50, 270, 50, 0xFFFFFF))
 splash.append(Line(0, 63, 270, 63, 0xFFFFFF))
 
@@ -126,53 +205,6 @@ charging.pull = Pull.DOWN
 analog_bat = AnalogIn(board.GP27)
 
 RGBled1 = adafruit_rgbled.RGBLED(board.GP7, board.GP8, board.GP9, invert_pwm=True)
-
-
-# Format Time
-def _format_datetime(datetime):
-    return "{:02}/{:02}/{:02} {:02}:{:02}".format(
-        datetime.tm_mon,
-        datetime.tm_mday,
-        datetime.tm_year % 100,
-        datetime.tm_hour,
-        datetime.tm_min,
-    )
-
-
-# Voltage Func
-def get_voltage(pin):
-    return ((pin.value * 3.3) / 65536) * 2
-
-
-def purple(data):
-    stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[38;5;104m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
-
-
-def green(data):
-    stamp = "{}".format(_format_datetime(time.localtime()))
-    return (
-        "\r\x1b[38;5;112m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
-    )
-
-
-def blue(data):
-    stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[38;5;14m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
-
-
-def yellow(data):
-    return "\x1b[38;5;220m" + data + "\x1b[0m"
-
-
-def red(data):
-    stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[1;5;31m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
-
-
-def bgred(data):
-    stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[41m[" + str(stamp) + "] " + config.call + data + "\x1b[0m"
 
 
 # text_area.text = "APRSiGate"
@@ -218,7 +250,7 @@ async def displayRunner(loop):
 
 
 async def loraRunner(loop):
-    global w, aprsMessage, aprsLastMessage, aprsGateway
+    global w, aprsMessage, aprsMessageCall, aprsMessageTimeStamp, aprsGateway
     # Continuously receives LoRa packets and forwards valid APRS packets
     # via WiFi. Configures LoRa radio, prints status messages, handles
     # exceptions, creates asyncio tasks to process packets.
@@ -262,8 +294,11 @@ async def loraRunner(loop):
                             message = aprsmessage[2]
                             if tocall is config.call:
                                 asyncio.create_task(playTone(loop))
-                                if aprsLastMessage.text == "":
-                                    aprsLastMessage.text = fromcall + ": " + message
+                                aprsMessage.text = message
+                                aprsMessageCall.text = "@ {:9}".format(fromcall)
+                                aprsMessageTimeStamp.text = "{}".format(
+                                    _format_datetime_short(time.localtime())
+                                )
                                 aprsSNR.text = "SNR:{:5}".format(str(rfm9x.last_snr))
                                 aprsGateway.text = "{:9}:".format(gateway)
 
