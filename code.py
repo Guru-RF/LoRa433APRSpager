@@ -1,4 +1,5 @@
 import asyncio
+import binascii
 import random
 import time
 
@@ -50,33 +51,57 @@ def get_voltage(pin):
 
 def purple(data):
     stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[38;5;104m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+    return (
+        "\033[K\x1b[38;5;104m["
+        + str(stamp)
+        + "] "
+        + config.call
+        + " "
+        + data
+        + "\x1b[0m"
+    )
 
 
 def green(data):
     stamp = "{}".format(_format_datetime(time.localtime()))
     return (
-        "\r\x1b[38;5;112m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+        "\033[K\x1b[38;5;112m["
+        + str(stamp)
+        + "] "
+        + config.call
+        + " "
+        + data
+        + "\x1b[0m"
     )
 
 
 def blue(data):
     stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[38;5;14m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+    return (
+        "\033[K\x1b[38;5;14m["
+        + str(stamp)
+        + "] "
+        + config.call
+        + " "
+        + data
+        + "\x1b[0m"
+    )
 
 
 def yellow(data):
-    return "\x1b[38;5;220m" + data + "\x1b[0m"
+    return "\033[K\x1b[38;5;220m" + data + "\x1b[0m"
 
 
 def red(data):
     stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[1;5;31m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+    return (
+        "\033[K\x1b[1;5;31m[" + str(stamp) + "] " + config.call + " " + data + "\x1b[0m"
+    )
 
 
 def bgred(data):
     stamp = "{}".format(_format_datetime(time.localtime()))
-    return "\x1b[41m[" + str(stamp) + "] " + config.call + data + "\x1b[0m"
+    return "\033[K\x1b[41m[" + str(stamp) + "] " + config.call + data + "\x1b[0m"
 
 
 # setup buzzer (set duty cycle to ON to sound)
@@ -234,7 +259,7 @@ w.timeout = 5
 w.mode = WatchDogMode.RESET
 w.feed()
 
-loraTimeout = 900
+loraTimeout = 15
 
 
 async def playTone(loop, type="default"):
@@ -294,6 +319,9 @@ async def loraRunner(loop):
 
     nrMessages = 0
 
+    # tx msg buffer
+    ackmsgs = []
+
     while True:
         await asyncio.sleep(0)
         w.feed()
@@ -302,7 +330,7 @@ async def loraRunner(loop):
             purple(f"loraRunner: Waiting for lora APRS packet timeout:{timeout} ...\r"),
             end="",
         )
-        # packet = rfm9x.receive(w, with_header=True, timeout=timeout)
+        startime = time.monotonic()
         packet = await rfm9x.areceive(w, with_header=True, timeout=timeout)
         if packet is not None:
             if packet[:3] == (b"<\xff\x01"):
@@ -323,8 +351,11 @@ async def loraRunner(loop):
                             fromcall = aprsmessage[0]
                             tocall = aprsmessage[1].strip()
                             message = aprsmessage[2]
+                            acknr = ""
+                            if "{" in aprsmessage[2]:
+                                message, acknr = aprsmessage[2].split("{", 1)
                             if tocall is config.call:
-                                asyncio.create_task(playTone(loop))
+                                # asyncio.create_task(playTone(loop))
                                 nrMessages += 1
                                 aprsMessage.text = "> {} | ".format(message)
                                 aprsMessageNr.text = "{:02}/{:02}".format(
@@ -337,11 +368,19 @@ async def loraRunner(loop):
                                 aprsSNR.text = "SNR:{:04}".format(str(rfm9x.last_snr))
                                 aprsGateway.text = "{:9}".format(gateway)
 
+                            ackmessage = ""
+                            if acknr != "":
+                                ackmessage = "{}>APRFGT::{:9}:ack{}".format(
+                                    config.call, fromcall, acknr
+                                )
+                                ackmsgs.append(ackmessage)
+
                             print(
-                                green(
-                                    f"loraRunner: MSG: FROM:{fromcall} TO:{tocall} MSG:{message}"
+                                yellow(
+                                    f"loraRunner: MSG: FROM:{fromcall} TO:{tocall} MSG:{message} ACK:{acknr} ACKMSG:{ackmessage}"
                                 )
                             )
+
                         elif aprsdata[1].count(":") == 1:
                             aprsmessage = aprsdata[1].split(":", 1)
                             tocall = aprsmessage[0]
@@ -353,6 +392,7 @@ async def loraRunner(loop):
                                 aprsGateway.text = "{:9}".format(gateway)
                                 rtc.RTC().datetime = time.localtime(int(aprstime))
 
+                                print()
                                 print(
                                     green(
                                         f"loraRunner: BEACON: FROM:{gateway} TO:{tocall} TIME:{aprstime}"
@@ -363,6 +403,21 @@ async def loraRunner(loop):
                     print(bgred(f"loraRunner: An exception occurred: {error}"))
                     print(purple("loraRunner: Lost Packet, unable to decode, skipping"))
                     continue
+
+        if timeout == int(time.monotonic() - startime):
+            if len(ackmsgs) != 0:
+                while len(ackmsgs) != 0:
+                    w.feed()
+                    packet = ackmsgs.pop(0)
+                    print()
+                    print(red(f"loraRunner: TX: {packet}"))
+                    await rfm9x.asend(
+                        bytes("{}".format("<"), "UTF-8")
+                        + binascii.unhexlify("FF")
+                        + binascii.unhexlify("01")
+                        + bytes("{}".format(packet), "UTF-8"),
+                    )
+                    w.feed()
 
 
 async def main():
