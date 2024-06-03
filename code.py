@@ -16,12 +16,16 @@ from adafruit_display_shapes.line import Line
 from adafruit_display_text.bitmap_label import Label
 from adafruit_display_text.scrolling_label import ScrollingLabel
 from analogio import AnalogIn
+from APRS import APRS
 from digitalio import DigitalInOut, Direction, Pull
 from displayio import FourWire
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
 
 import config
+
+VERSION = "APRSPager"
+RELEASE = "0.0.1"
 
 
 # Format Time
@@ -261,6 +265,9 @@ w.feed()
 
 loraTimeout = 15
 
+# aprs
+aprs = APRS()
+
 
 async def playTone(loop, type="default"):
     OFF = 0
@@ -355,7 +362,7 @@ async def loraRunner(loop):
                             if "{" in aprsmessage[2]:
                                 message, acknr = aprsmessage[2].split("{", 1)
                             if tocall is config.call:
-                                # asyncio.create_task(playTone(loop))
+                                asyncio.create_task(playTone(loop))
                                 nrMessages += 1
                                 aprsMessage.text = "> {} | ".format(message)
                                 aprsMessageNr.text = "{:02}/{:02}".format(
@@ -370,7 +377,7 @@ async def loraRunner(loop):
 
                             ackmessage = ""
                             if acknr != "":
-                                ackmessage = "{}>APRFGT::{:9}:ack{}".format(
+                                ackmessage = "{}>APRFGG::{:9}:ack{}".format(
                                     config.call, fromcall, acknr
                                 )
                                 ackmsgs.append(ackmessage)
@@ -384,10 +391,13 @@ async def loraRunner(loop):
                         elif aprsdata[1].count(":") == 1:
                             aprsmessage = aprsdata[1].split(":", 1)
                             tocall = aprsmessage[0]
-                            gateway = (rawdata.split(">", 1))[0]
-                            aprstime = aprsmessage[1].strip()
-                            if tocall == "APRFGD":
+                            if tocall == "APRFGD" or tocall == "APRFGI":
                                 asyncio.create_task(playTone(loop, "beacon"))
+                                gateway = (rawdata.split(">", 1))[0]
+                                aprstimelocation = aprsmessage[1].strip()
+                                aprstime, latitude, longitude = aprstimelocation.split(
+                                    "|"
+                                )
                                 aprsSNR.text = "SNR:{:04}".format(str(rfm9x.last_snr))
                                 aprsGateway.text = "{:9}".format(gateway)
                                 rtc.RTC().datetime = time.localtime(int(aprstime))
@@ -398,6 +408,40 @@ async def loraRunner(loop):
                                         f"loraRunner: BEACON: FROM:{gateway} TO:{tocall} TIME:{aprstime}"
                                     )
                                 )
+
+                                locationrandom = str(rfm9x.last_rssi * -1)
+
+                                pos = aprs.makePosition(
+                                    float(latitude[:-2] + locationrandom),
+                                    float(longitude[:-2] + locationrandom),
+                                    -1,
+                                    -1,
+                                    config.symbol,
+                                )
+
+                                comment = VERSION + "." + RELEASE + " " + config.comment
+                                now = time.localtime()
+                                ts = aprs.makeTimestamp(
+                                    "z",
+                                    now.tm_mday,
+                                    now.tm_hour,
+                                    now.tm_min,
+                                    now.tm_sec,
+                                )
+                                message = f"{config.call}>APRFGG:@{ts}{pos}{comment}\n"
+
+                                w.feed()
+                                await asyncio.sleep(random.randint(1, 4))
+                                w.feed()
+
+                                print(red(f"loraRunner: BEACON POS ACK: {message}"))
+                                await rfm9x.asend(
+                                    bytes("{}".format("<"), "UTF-8")
+                                    + binascii.unhexlify("FF")
+                                    + binascii.unhexlify("01")
+                                    + bytes("{}".format(message), "UTF-8"),
+                                )
+                                w.feed()
                     await asyncio.sleep(0)
                 except Exception as error:
                     print(bgred(f"loraRunner: An exception occurred: {error}"))
